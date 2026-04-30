@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A2A Flow Visualizer</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace; background: #0f172a; color: #e2e8f0; height: 100vh; overflow: hidden; font-size: 14px; }
+
+  header { background: #1e293b; padding: 14px 24px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; }
+  header h1 { font-size: 20px; color: #38bdf8; }
+  header h1 span { color: #64748b; font-weight: normal; font-size: 14px; }
+  .status { display: flex; align-items: center; gap: 12px; font-size: 12px; color: #94a3b8; }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #ef4444; }
+  .status-dot.connected { background: #22c55e; animation: pulse 2s infinite; }
+  .btn-start { background: #22c55e; color: #052e16; border: none; padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; }
+  .btn-start:hover { background: #16a34a; }
+  .btn-start:disabled { background: #334155; color: #64748b; cursor: not-allowed; }
+
+  .container { display: grid; grid-template-columns: 400px 1fr 340px; height: calc(100vh - 53px); overflow: hidden; }
+
+  /* ── LEFT: Flow Visualization ── */
+  .flow { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 20px 10px; overflow-y: auto; overflow-x: hidden; }
+
+  /* User bubble */
+  .user-bubble { opacity: 0; background: #1e1b4b; border: 1px solid #4338ca; border-radius: 12px; padding: 10px 16px; font-size: 14px; color: #a5b4fc; max-width: 360px; text-align: center; margin-bottom: 14px; transition: all 0.4s; }
+  .user-bubble.visible { opacity: 1; animation: fadeSlideDown 0.4s ease-out; }
+
+  /* Concierge node */
+  .concierge { width: 200px; background: #1e293b; border: 2px solid #334155; border-radius: 12px; padding: 16px; text-align: center; transition: all 0.4s; position: relative; }
+  .concierge.thinking { border-color: #f472b6; box-shadow: 0 0 20px rgba(244,114,182,0.2); }
+  .concierge.done { border-color: #22c55e; }
+  .concierge-icon { font-size: 32px; }
+  .concierge-label { font-size: 15px; font-weight: 600; margin-top: 4px; }
+  .concierge-status { font-size: 13px; color: #64748b; margin-top: 4px; min-height: 18px; }
+  .thinking-dots { display: inline-flex; gap: 3px; }
+  .thinking-dots span { display: inline-block; width: 5px; height: 5px; background: #f472b6; border-radius: 50%; }
+  .thinking-dots span:nth-child(1) { animation: bounce 1.4s 0s infinite; }
+  .thinking-dots span:nth-child(2) { animation: bounce 1.4s 0.2s infinite; }
+  .thinking-dots span:nth-child(3) { animation: bounce 1.4s 0.4s infinite; }
+
+  /* Discovery ripple */
+  .ripple-container { position: absolute; top: 50%; left: 50%; width: 0; height: 0; }
+  .ripple { position: absolute; border: 2px solid #38bdf8; border-radius: 50%; opacity: 0; transform: translate(-50%, -50%); }
+  .ripple.active { animation: rippleOut 1.5s ease-out forwards; }
+
+  /* Arrows area */
+  .arrows { display: flex; justify-content: center; gap: 40px; margin: 10px 0; min-height: 40px; }
+  .arrow-line { width: 2px; height: 40px; position: relative; opacity: 0; transition: opacity 0.3s; }
+  .arrow-line.visible { opacity: 1; }
+  .arrow-line .line { width: 2px; height: 100%; background: #334155; }
+  .arrow-line.active .line { background: #fbbf24; animation: dashFlow 1s linear infinite; background: repeating-linear-gradient(to bottom, #fbbf24 0px, #fbbf24 6px, transparent 6px, transparent 12px); background-size: 2px 12px; animation: flowDown 0.5s linear infinite; }
+  .arrow-line.complete .line { background: #22c55e; }
+  .arrow-packet { position: absolute; width: 8px; height: 8px; border-radius: 50%; background: #fbbf24; left: -3px; top: 0; opacity: 0; }
+  .arrow-packet.sending { opacity: 1; animation: packetDown 0.6s ease-in-out forwards; }
+  .arrow-packet.returning { opacity: 1; background: #22c55e; animation: packetUp 0.6s ease-in-out forwards; }
+
+  /* Agent nodes */
+  .agents { display: flex; justify-content: center; gap: 10px; opacity: 0; transition: all 0.5s; flex-wrap: wrap; }
+  .agents.visible { opacity: 1; animation: fadeSlideUp 0.5s ease-out; }
+  .agent { width: 155px; background: #1e293b; border: 2px solid #334155; border-radius: 10px; padding: 10px 8px; text-align: center; transition: all 0.3s; position: relative; }
+  .agent.sending { border-color: #fbbf24; }
+  .agent.working { border-color: #f59e0b; animation: pulseOrange 1.5s infinite; }
+  .agent.streaming { border-color: #a78bfa; box-shadow: 0 0 12px rgba(167,139,250,0.3); animation: pulsePurple 1s infinite; }
+  .agent.done { border-color: #22c55e; box-shadow: 0 0 12px rgba(34,197,94,0.2); }
+  .agent-icon { font-size: 26px; }
+  .agent-name { font-size: 12px; font-weight: 600; margin-top: 3px; }
+  .agent-badge { font-size: 10px; margin-top: 4px; padding: 2px 8px; border-radius: 4px; display: inline-block; word-break: break-all; max-width: 140px; }
+  .agent-badge.idle { background: #1e293b; color: #475569; border: 1px solid #334155; }
+  .agent-badge.busy { background: #422006; color: #f59e0b; }
+  .agent-badge.ok { background: #052e16; color: #22c55e; }
+
+  /* Agent skill details */
+  .agent-skills { font-size: 10px; color: #475569; margin-top: 6px; text-align: left; padding: 0 2px; max-height: 0; overflow: hidden; transition: max-height 0.6s ease-out; }
+  .agent-skills.visible { max-height: 180px; }
+  .agent-skill-id { color: #38bdf8; font-weight: 600; font-size: 11px; display: block; margin-bottom: 3px; }
+  .agent-skill-desc { color: #64748b; font-size: 10px; display: block; margin-bottom: 4px; }
+  .tag-row { display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 4px; }
+  .tag { display: inline-block; background: #1e3a5f; color: #38bdf8; padding: 2px 7px; border-radius: 8px; font-size: 10px; }
+  .cap-row { display: flex; gap: 6px; font-size: 10px; color: #475569; }
+  .cap { display: inline-flex; align-items: center; gap: 2px; }
+  .cap-on { color: #22c55e; }
+  .cap-off { color: #475569; }
+
+  /* Streaming text inside agent */
+  .agent-stream-text { font-size: 11px; color: #a78bfa; margin-top: 6px; min-height: 0; max-height: 0; overflow: hidden; transition: max-height 0.3s ease-out; word-break: break-word; line-height: 1.4; font-family: inherit; }
+  .agent-stream-text.visible { max-height: 80px; min-height: 18px; }
+  .agent-stream-text .cursor { display: inline-block; width: 5px; height: 10px; background: #a78bfa; animation: blink 0.6s infinite; margin-left: 1px; vertical-align: text-bottom; }
+
+  /* Progress bar inside agent */
+  .agent-progress { height: 3px; background: #334155; border-radius: 2px; margin-top: 8px; overflow: hidden; opacity: 0; }
+  .agent-progress.visible { opacity: 1; }
+  .agent-progress-bar { height: 100%; width: 0; background: #f59e0b; transition: width 2s linear; border-radius: 2px; }
+
+  /* Summary bubble */
+  .summary-bubble { opacity: 0; background: #052e16; border: 1px solid #22c55e; border-radius: 12px; padding: 12px 16px; font-size: 13px; color: #86efac; max-width: 440px; text-align: center; margin-top: 16px; transition: all 0.4s; }
+  .summary-bubble.visible { opacity: 1; animation: fadeSlideUp 0.4s ease-out; }
+
+  /* ── CENTER: Chat Pane ── */
+  .chat-pane { background: #0f172a; border-left: 1px solid #334155; display: flex; flex-direction: column; }
+  .chat-pane h2 { font-size: 13px; text-transform: uppercase; color: #475569; padding: 14px 16px 6px; letter-spacing: 1px; }
+  .chat-messages { flex: 1; overflow-y: auto; padding: 8px 12px; }
+  .chat-msg { margin-bottom: 10px; animation: fadeSlideUp 0.3s ease-out; }
+  .chat-msg.user-msg .chat-bubble { background: #1e1b4b; border: 1px solid #4338ca; color: #a5b4fc; margin-left: 30px; }
+  .chat-msg.bot-msg .chat-bubble { background: #052e16; border: 1px solid #22c55e; color: #86efac; margin-right: 30px; }
+  .chat-msg.bot-msg.loading .chat-bubble { background: #1e293b; border-color: #475569; color: #64748b; }
+  .chat-bubble { padding: 10px 14px; border-radius: 10px; font-size: 14px; line-height: 1.5; word-break: break-word; }
+  .chat-sender { font-size: 11px; text-transform: uppercase; color: #475569; margin-bottom: 3px; letter-spacing: 0.5px; }
+  .chat-input-row { display: flex; gap: 8px; padding: 12px; border-top: 1px solid #334155; }
+  .chat-input { flex: 1; background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 10px 12px; color: #e2e8f0; font-family: inherit; font-size: 14px; outline: none; }
+  .chat-input:focus { border-color: #38bdf8; }
+  .chat-input:disabled { opacity: 0.5; }
+  .chat-send { background: #38bdf8; color: #0f172a; border: none; padding: 10px 16px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; }
+  .chat-send:hover { background: #0ea5e9; }
+  .chat-send:disabled { background: #334155; color: #64748b; cursor: not-allowed; }
+
+  /* ── LEFT: Telemetry Log ── */
+  .telemetry { background: #1e293b; border-right: 1px solid #334155; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
+  .telemetry h2 { font-size: 13px; text-transform: uppercase; color: #475569; padding: 14px 16px 6px; letter-spacing: 1px; flex-shrink: 0; }
+  .event-count { font-size: 12px; color: #334155; padding: 0 16px 8px; flex-shrink: 0; }
+  .log { flex: 1; overflow-y: auto; padding: 0 12px 12px; min-height: 0; scrollbar-width: thin; scrollbar-color: #475569 #1e293b; }
+  .log::-webkit-scrollbar { width: 6px; }
+  .log::-webkit-scrollbar-track { background: #1e293b; }
+  .log::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+  .log::-webkit-scrollbar-thumb:hover { background: #64748b; }
+
+  .evt { display: flex; gap: 8px; padding: 6px 8px; margin-bottom: 3px; border-radius: 4px; animation: slideIn 0.25s ease-out; font-size: 13px; border-left: 3px solid transparent; }
+  .evt:hover { background: #0f172a; }
+  .evt-time { color: #475569; min-width: 60px; font-size: 12px; }
+  .evt-icon { min-width: 20px; text-align: center; font-size: 14px; }
+  .evt-text { color: #94a3b8; flex: 1; word-break: break-word; line-height: 1.4; }
+  .evt-text strong { color: #e2e8f0; font-size: 12px; letter-spacing: 0.3px; }
+
+  /* High-relevance events — larger, bolder */
+  .evt.user { font-size: 15px; padding: 8px 8px; }
+  .evt.user .evt-icon { font-size: 16px; }
+  .evt.user .evt-text strong { font-size: 14px; color: #a5b4fc; }
+  .evt.complete { font-size: 15px; padding: 8px 8px; }
+  .evt.complete .evt-icon { font-size: 16px; }
+  .evt.complete .evt-text strong { font-size: 14px; color: #86efac; }
+  .evt.summary { font-size: 15px; padding: 8px 8px; }
+  .evt.summary .evt-icon { font-size: 16px; }
+  .evt.summary .evt-text strong { font-size: 14px; color: #c4b5fd; }
+  .evt.error { font-size: 15px; padding: 8px 8px; }
+  .evt.error .evt-text strong { font-size: 14px; color: #fca5a5; }
+
+  /* Medium-relevance events */
+  .evt.discover { font-size: 14px; }
+  .evt.discover .evt-text strong { font-size: 13px; }
+  .evt.plan_result { font-size: 14px; }
+  .evt.plan_result .evt-text strong { font-size: 13px; color: #f9a8d4; }
+  .evt.send { font-size: 14px; }
+  .evt.send .evt-text strong { font-size: 13px; }
+
+  /* Low-relevance events — smaller, dimmer */
+  .evt.progress { font-size: 11px; opacity: 0.7; }
+  .evt.streaming { font-size: 11px; opacity: 0.8; }
+
+  .evt.startup { border-left-color: #38bdf8; }
+  .evt.bedrock { border-left-color: #8b5cf6; }
+  .evt.discover { border-left-color: #38bdf8; }
+  .evt.user { border-left-color: #a78bfa; }
+  .evt.llm_thinking, .evt.plan_result { border-left-color: #f472b6; }
+  .evt.send { border-left-color: #fbbf24; }
+  .evt.working { border-left-color: #f59e0b; }
+  .evt.streaming { border-left-color: #a78bfa; }
+  .evt.progress { border-left-color: #475569; }
+  .evt.complete { border-left-color: #22c55e; animation: slideIn 0.25s, flashGreen 0.8s; }
+  .evt.summary { border-left-color: #8b5cf6; }
+  .evt.error { border-left-color: #ef4444; }
+
+  .empty { text-align: center; padding: 40px 16px; color: #334155; font-size: 12px; }
+
+  /* ── Animations ── */
+  @keyframes fadeSlideDown { from { opacity:0; transform:translateY(-15px); } to { opacity:1; transform:translateY(0); } }
+  @keyframes fadeSlideUp { from { opacity:0; transform:translateY(15px); } to { opacity:1; transform:translateY(0); } }
+  @keyframes slideIn { from { opacity:0; transform:translateX(20px); } to { opacity:1; transform:translateX(0); } }
+  @keyframes flashGreen { 0% { background:rgba(34,197,94,0.12); } 100% { background:transparent; } }
+  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
+  @keyframes pulseOrange { 0%,100% { box-shadow:0 0 0 0 rgba(245,158,11,0.3); } 50% { box-shadow:0 0 10px 4px rgba(245,158,11,0); } }
+  @keyframes pulsePurple { 0%,100% { box-shadow:0 0 0 0 rgba(167,139,250,0.3); } 50% { box-shadow:0 0 10px 4px rgba(167,139,250,0); } }
+  @keyframes blink { 0%,100% { opacity:1; } 50% { opacity:0; } }
+  @keyframes bounce { 0%,80%,100% { transform:translateY(0); } 40% { transform:translateY(-5px); } }
+  @keyframes rippleOut { 0% { width:0;height:0;opacity:0.6; } 100% { width:200px;height:200px;opacity:0; } }
+  @keyframes flowDown { from { background-position:0 0; } to { background-position:0 12px; } }
+  @keyframes packetDown { 0% { top:0;opacity:1; } 100% { top:42px;opacity:0.5; } }
+  @keyframes packetUp { 0% { top:42px;opacity:1; } 100% { top:0;opacity:0.5; } }
+  @keyframes spin { 0% { transform:rotate(0deg); } 100% { transform:rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🍕 A2A Flow Visualizer <span>— Live</span></h1>
+  <div class="status">
+    <button class="btn-start" id="btnStart" onclick="startAgents()">▶ Start Agents</button>
+    <button class="btn-start" style="background:#64748b;color:#e2e8f0" onclick="clearPage()">🗑 Clear</button>
+    <div class="status-dot" id="dot"></div>
+    <span id="dotText">Connecting...</span>
+  </div>
+</header>
+
+<div class="container">
+  <!-- LEFT: Telemetry Log -->
+  <div class="telemetry">
+    <h2>Telemetry</h2>
+    <div class="event-count" id="evtCount">0 events</div>
+    <div class="log" id="log">
+      <div class="empty" id="emptyLog">Waiting for events...</div>
+    </div>
+  </div>
+
+  <!-- CENTER: Animated Flow -->
+  <div class="flow">
+    <div class="user-bubble" id="userBubble"></div>
+
+    <div class="concierge" id="concierge">
+      <div class="ripple-container"><div class="ripple" id="ripple1"></div><div class="ripple" id="ripple2"></div></div>
+      <div class="concierge-icon">🧠</div>
+      <div class="concierge-label">Concierge</div>
+      <div class="concierge-status" id="conciergeStatus">Starting...</div>
+    </div>
+
+    <div class="arrows">
+      <div class="arrow-line" id="arrow-pizza"><div class="line"></div><div class="arrow-packet" id="pkt-pizza"></div></div>
+      <div class="arrow-line" id="arrow-burger"><div class="line"></div><div class="arrow-packet" id="pkt-burger"></div></div>
+      <div class="arrow-line" id="arrow-pasta"><div class="line"></div><div class="arrow-packet" id="pkt-pasta"></div></div>
+      <div class="arrow-line" id="arrow-catering"><div class="line"></div><div class="arrow-packet" id="pkt-catering"></div></div>
+    </div>
+
+    <div class="agents" id="agentRow">
+      <div class="agent" id="ag-pizza">
+        <div class="agent-icon">🍕</div>
+        <div class="agent-name">Pizza Seller</div>
+        <div class="agent-badge idle" id="badge-pizza">idle</div>
+        <div class="agent-skills" id="skills-pizza"></div>
+        <div class="agent-progress" id="prog-pizza"><div class="agent-progress-bar" id="progbar-pizza"></div></div>
+      </div>
+      <div class="agent" id="ag-burger">
+        <div class="agent-icon">🍔</div>
+        <div class="agent-name">Burger Seller</div>
+        <div class="agent-badge idle" id="badge-burger">idle</div>
+        <div class="agent-skills" id="skills-burger"></div>
+        <div class="agent-progress" id="prog-burger"><div class="agent-progress-bar" id="progbar-burger"></div></div>
+      </div>
+      <div class="agent" id="ag-pasta">
+        <div class="agent-icon">🍝</div>
+        <div class="agent-name">Pasta Seller</div>
+        <div class="agent-badge idle" id="badge-pasta">idle</div>
+        <div class="agent-skills" id="skills-pasta"></div>
+        <div class="agent-stream-text" id="stream-pasta"></div>
+        <div class="agent-progress" id="prog-pasta"><div class="agent-progress-bar" id="progbar-pasta"></div></div>
+      </div>
+      <div class="agent" id="ag-catering">
+        <div class="agent-icon">🍽️</div>
+        <div class="agent-name">Catering Planner</div>
+        <div class="agent-badge idle" id="badge-catering">idle</div>
+        <div class="agent-skills" id="skills-catering"></div>
+        <div class="agent-progress" id="prog-catering"><div class="agent-progress-bar" id="progbar-catering"></div></div>
+      </div>
+    </div>
+
+    <div class="summary-bubble" id="summaryBubble"></div>
+  </div>
+
+  <!-- RIGHT: Chat Pane -->
+  <div class="chat-pane">
+    <h2>Chat</h2>
+    <div class="chat-messages" id="chatMessages">
+      <div class="empty" id="chatEmpty">Click "Start Agents" then type your order below</div>
+    </div>
+    <div class="chat-input-row">
+      <input class="chat-input" id="chatInput" placeholder="Type your lunch order..." disabled onkeydown="if(event.key==='Enter')sendChat()">
+      <button class="chat-send" id="chatSend" onclick="sendChat()" disabled>Send</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const log = $('log'), emptyLog = $('emptyLog');
+let evtN = 0, progressCount = {};
+
+const ICONS = { startup:'🚀', bedrock:'☁️', discover:'🔍', user:'💬', llm_thinking:'🧠', plan_result:'📋', send:'📤', working:'⏳', streaming:'🔤', progress:'├', complete:'✅', error:'❌', summary:'🍽️' };
+
+function fmtTime(ts) { return new Date(ts*1000).toLocaleTimeString('en-US',{hour12:false,hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
+
+function agentKey(n) {
+  if(!n) return '';
+  const l=n.toLowerCase();
+  if(l.includes('pizza')) return 'pizza';
+  if(l.includes('burger')) return 'burger';
+  if(l.includes('pasta')) return 'pasta';
+  if(l.includes('cater')) return 'catering';
+  return '';
+}
+
+function addLog(type, data) {
+  if(emptyLog) emptyLog.remove();
+  evtN++; $('evtCount').textContent = evtN+' events';
+  const d = document.createElement('div');
+  d.className = 'evt '+type;
+  const t = data.timestamp ? fmtTime(data.timestamp) : '';
+  const icon = ICONS[type]||'•';
+  let title = '', body = '';
+  switch(type) {
+    case 'startup':
+      title='AGENT SERVERS'; body=data.message||'Starting...'; break;
+    case 'bedrock':
+      title='BEDROCK CONVERSE API'; body=data.status==='connected'?'✓ Connected to Claude':'Connecting...'; break;
+    case 'discover':
+      title='AGENT CARD DISCOVERY'; body='GET /.well-known/agent-card.json → '+(data.agents||[]).join(', '); break;
+    case 'user':
+      title='MESSAGE (role: USER)'; body='"'+(data.text||'')+'"'; break;
+    case 'llm_thinking':
+      title='LLM PLANNER (Bedrock Converse)'; body=data.message||'Planning...'; break;
+    case 'plan_result':
+      title='DELEGATION PLAN'; body='→ '+(data.delegations||[]).join(' + '); break;
+    case 'send':
+      title='SEND MESSAGE'; body='→ '+(data.agent||'')+': '+(data.text||'').slice(0,60); break;
+    case 'streaming':
+      title='SSE STREAM (REST: /message:stream)'; body='🔤 '+(data.agent||'')+': '+(data.text||'').slice(0,50); break;
+    case 'working':
+      title='TASK CREATED (state: WORKING)'; body=(data.agent||'')+' task_id='+(data.task_id||'').slice(0,12); break;
+    case 'progress':
+      title='TASK POLL (JSON-RPC: GetTask)'; body=(data.message||''); break;
+    case 'complete':
+      title='TASK COMPLETED (state: COMPLETED)'; body=(data.agent||'')+': '+(data.reply||'').slice(0,60); break;
+    case 'summary':
+      title='LLM SUMMARY (Bedrock Converse)'; body=(data.text||'').slice(0,100); break;
+    case 'error':
+      title='ERROR'; body=(data.error||''); break;
+    default:
+      title=type.toUpperCase(); body=JSON.stringify(data).slice(0,80);
+  }
+  d.innerHTML = `<span class="evt-time">${t}</span><span class="evt-icon">${icon}</span><span class="evt-text"><strong>${title}</strong><br>${body}</span>`;
+  log.appendChild(d);
+  log.scrollTop = log.scrollHeight;
+}
+
+// ── Flow Animations ──
+
+function setConcierge(status, text) {
+  const c=$('concierge'), s=$('conciergeStatus');
+  c.classList.remove('thinking','done');
+  if(status==='thinking') { c.classList.add('thinking'); s.innerHTML='<span class="thinking-dots"><span></span><span></span><span></span></span> '+text; }
+  else if(status==='done') { c.classList.add('done'); s.textContent=text; }
+  else { s.textContent=text||'Ready'; }
+}
+
+function showDiscoveryRipple() {
+  [$('ripple1'),$('ripple2')].forEach((r,i) => {
+    setTimeout(()=>{ r.classList.remove('active'); void r.offsetWidth; r.classList.add('active'); }, i*400);
+  });
+}
+
+function showAgents() { $('agentRow').classList.add('visible'); ['pizza','burger','pasta','catering'].forEach(k=>{ $('arrow-'+k).classList.add('visible'); }); }
+
+function populateAgentSkills(details) {
+  (details||[]).forEach(agent => {
+    const key = agentKey(agent.name);
+    const el = $('skills-'+key);
+    if (!el) return;
+    let html = '';
+    (agent.skills||[]).forEach(s => {
+      // Skill ID
+      html += `<span class="agent-skill-id">📋 ${s.id}</span>`;
+      // Tag pills
+      if (s.tags && s.tags.length) {
+        html += '<div class="tag-row">';
+        s.tags.forEach(t => { html += `<span class="tag">${t}</span>`; });
+        html += '</div>';
+      }
+    });
+    // Capabilities — pasta has streaming=true
+    const isStreamingAgent = key === 'pasta';
+    html += '<div class="cap-row">';
+    html += isStreamingAgent ? '<span class="cap cap-on">✓ stream</span>' : '<span class="cap cap-off">✗ stream</span>';
+    html += '<span class="cap cap-off">✗ push</span>';
+    html += '</div>';
+    el.innerHTML = html;
+    setTimeout(() => el.classList.add('visible'), 200);
+  });
+}
+
+function setAgent(key, status, text) {
+  const ag=$('ag-'+key), badge=$('badge-'+key);
+  if(!ag) return;
+  ag.classList.remove('sending','working','streaming','done');
+  badge.classList.remove('idle','busy','ok');
+  if(status==='sending') { ag.classList.add('sending'); badge.classList.add('busy'); badge.textContent=text ? '📋 '+text : '→ sending'; sendPacket(key); }
+  else if(status==='working') { ag.classList.add('working'); badge.classList.add('busy'); badge.textContent=text ? '⏳ '+text : '⏳ working'; $('arrow-'+key).classList.add('active'); $('prog-'+key).classList.add('visible'); progressCount[key]=0; }
+  else if(status==='streaming') { ag.classList.add('streaming'); badge.classList.add('busy'); badge.textContent=text ? '🔤 '+text : '🔤 streaming'; $('arrow-'+key).classList.add('active'); const st=$('stream-'+key); if(st) { st.innerHTML='<span class="cursor"></span>'; st.classList.add('visible'); } }
+  else if(status==='done') { ag.classList.add('done'); badge.classList.add('ok'); badge.textContent=text ? '✓ '+text : '✓ done'; $('arrow-'+key).classList.remove('active'); $('arrow-'+key).classList.add('complete'); returnPacket(key); const st=$('stream-'+key); if(st) { st.classList.remove('visible'); st.innerHTML=''; } }
+  else { badge.classList.add('idle'); badge.textContent='idle'; $('arrow-'+key).classList.remove('active','complete'); $('prog-'+key).classList.remove('visible'); $('progbar-'+key).style.width='0%'; const st=$('stream-'+key); if(st) { st.classList.remove('visible'); st.innerHTML=''; } }
+}
+
+function updateStreamText(key, text) {
+  const st = $('stream-'+key);
+  if (!st) return;
+  st.innerHTML = text.slice(0, 80) + '<span class="cursor"></span>';
+  st.classList.add('visible');
+}
+
+function advanceProgress(key) {
+  progressCount[key] = (progressCount[key]||0) + 1;
+  const pct = Math.min(progressCount[key]*25, 100);
+  $('progbar-'+key).style.width = pct+'%';
+}
+
+function sendPacket(key) { const p=$('pkt-'+key); p.classList.remove('sending','returning'); void p.offsetWidth; p.classList.add('sending'); }
+function returnPacket(key) { const p=$('pkt-'+key); p.classList.remove('sending','returning'); void p.offsetWidth; p.classList.add('returning'); }
+
+function showUserBubble(text) { const b=$('userBubble'); b.textContent='💬 "'+text+'"'; b.classList.remove('visible'); void b.offsetWidth; b.classList.add('visible'); }
+function showSummary(text) { const b=$('summaryBubble'); b.textContent='🍽️ '+text; b.classList.remove('visible'); void b.offsetWidth; b.classList.add('visible'); }
+function hideSummary() { $('summaryBubble').classList.remove('visible'); }
+
+// ── Event Handler ──
+
+function handleEvent(type, data) {
+  addLog(type, data);
+
+  switch(type) {
+    case 'startup':
+      setConcierge('thinking', '🔍 Discovering Agent Cards...');
+      break;
+    case 'bedrock':
+      setConcierge(data.status==='connected'?'done':'thinking', data.status==='connected'?'☁️ Bedrock connected':'Connecting to Bedrock...');
+      break;
+    case 'discover':
+      showDiscoveryRipple();
+      setTimeout(()=>{
+        showAgents();
+        // Populate skills in agent boxes
+        populateAgentSkills(data.details||[]);
+      }, 600);
+      setConcierge('done', '✓ Discovered '+(data.agents||[]).length+' agents');
+      break;
+    case 'user':
+      hideSummary();
+      showUserBubble(data.text||'');
+      ['pizza','burger','pasta','catering'].forEach(k=>setAgent(k,'idle'));
+      setConcierge('idle','Processing...');
+      break;
+    case 'llm_thinking':
+      setConcierge('thinking', data.message||'Planning...');
+      break;
+    case 'plan_result':
+      setConcierge('done','Plan: '+(data.delegations||[]).join(' + '));
+      // Light up arrows for planned agents
+      (data.delegations||[]).forEach(name => {
+        const k=agentKey(name);
+        if(k) { $('arrow-'+k).classList.add('active'); }
+      });
+      break;
+    case 'send':
+      const sk=agentKey(data.agent);
+      if(sk) {
+        const sid = data.skill_id || '';
+        if(sk==='pasta') { setAgent(sk,'streaming', sid); }
+        else { setAgent(sk,'sending', sid); }
+      }
+      break;
+    case 'streaming':
+      const stk=agentKey(data.agent);
+      if(stk) {
+        setAgent(stk,'streaming', data.skill_id||'');
+        updateStreamText(stk, data.text||'');
+      }
+      break;
+    case 'working':
+      const wk=agentKey(data.agent);
+      if(wk) setAgent(wk,'working', data.skill_id||'');
+      break;
+    case 'progress':
+      const pk=agentKey(data.agent);
+      if(pk) advanceProgress(pk);
+      break;
+    case 'complete':
+      const ck=agentKey(data.agent);
+      if(ck) setAgent(ck,'done', data.skill_id||'');
+      break;
+    case 'summary':
+      showSummary((data.text||'').slice(0,150));
+      setConcierge('done','✓ Order complete');
+      break;
+    case 'error':
+      setConcierge('idle','⚠️ Error');
+      break;
+  }
+}
+
+// ── Chat Pane: Start Agents + Send Chat ──
+
+let agentsReady = false;
+
+async function startAgents() {
+  const btn = $('btnStart');
+  btn.disabled = true;
+  btn.textContent = '⏳ Starting...';
+  const ce = $('chatEmpty');
+
+  try {
+    const res = await fetch('/api/start', { method: 'POST' });
+    const data = await res.json();
+    if (data.ok) {
+      agentsReady = true;
+      btn.textContent = '✓ Agents Running';
+      $('chatInput').disabled = false;
+      $('chatSend').disabled = false;
+      if (ce) ce.textContent = '✓ Agents ready — type your order below!';
+      $('chatInput').focus();
+    } else {
+      btn.textContent = '❌ Failed';
+      btn.disabled = false;
+    }
+  } catch (err) {
+    btn.textContent = '❌ Error';
+    btn.disabled = false;
+    console.error('Start failed:', err);
+  }
+}
+
+function addChatMsg(sender, text, cls) {
+  const ce = $('chatEmpty');
+  if (ce) ce.remove();
+  const msgs = $('chatMessages');
+  const d = document.createElement('div');
+  d.className = 'chat-msg ' + cls;
+  d.innerHTML = `<div class="chat-sender">${sender}</div><div class="chat-bubble">${text}</div>`;
+  msgs.appendChild(d);
+  msgs.scrollTop = msgs.scrollHeight;
+  return d;
+}
+
+async function sendChat() {
+  const input = $('chatInput');
+  const text = input.value.trim();
+  if (!text || !agentsReady) return;
+
+  input.value = '';
+  input.disabled = true;
+  $('chatSend').disabled = true;
+
+  // Show user message
+  addChatMsg('You', text, 'user-msg');
+
+  // Show loading bubble
+  const loadingMsg = addChatMsg('Concierge', '<span class="thinking-dots"><span></span><span></span><span></span></span> Thinking...', 'bot-msg loading');
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    const data = await res.json();
+
+    // Replace loading with actual response
+    loadingMsg.remove();
+    if (data.summary) {
+      addChatMsg('🍽️ Concierge', data.summary, 'bot-msg');
+    } else if (data.error) {
+      addChatMsg('⚠️ Error', data.error, 'bot-msg');
+    }
+  } catch (err) {
+    loadingMsg.remove();
+    addChatMsg('⚠️ Error', 'Request failed: ' + err.message, 'bot-msg');
+  }
+
+  input.disabled = false;
+  $('chatSend').disabled = false;
+  input.focus();
+}
+
+// ── Clear / Reset ──
+
+function clearPage() {
+  // Reset telemetry log
+  const logEl = $('log');
+  logEl.innerHTML = '<div class="empty" id="emptyLog">Waiting for events...</div>';
+  evtN = 0;
+  $('evtCount').textContent = '0 events';
+
+  // Reset chat messages
+  $('chatMessages').innerHTML = '<div class="empty" id="chatEmpty">Type your order below</div>';
+
+  // Reset flow visualization
+  hideSummary();
+  $('userBubble').classList.remove('visible');
+  $('userBubble').textContent = '';
+  setConcierge('done', agentsReady ? '✓ Ready for orders' : 'Waiting...');
+  ['pizza','burger','pasta','catering'].forEach(k => {
+    setAgent(k, 'idle');
+    $('arrow-'+k).classList.remove('active','complete');
+    const pkt = $('pkt-'+k);
+    pkt.classList.remove('sending','returning');
+    pkt.style.opacity = '0';
+    $('progbar-'+k).style.width = '0%';
+    $('prog-'+k).classList.remove('visible');
+    const st = $('stream-'+k);
+    if(st) { st.classList.remove('visible'); st.innerHTML=''; }
+  });
+  progressCount = {};
+
+  // Clear server-side event history too
+  fetch('/api/clear', { method: 'POST' }).catch(() => {});
+}
+
+// ── SSE Connection ──
+
+function connect() {
+  const es = new EventSource('/events');
+  es.onopen = () => { $('dot').classList.add('connected'); $('dotText').textContent='Connected'; };
+  es.onerror = () => { $('dot').classList.remove('connected'); $('dotText').textContent='Reconnecting...'; };
+
+  ['startup','bedrock','discover','user','llm_thinking','plan_result','send','working','streaming','progress','complete','error','summary'].forEach(type => {
+    es.addEventListener(type, e => { try { handleEvent(type, JSON.parse(e.data)); } catch(err) { console.error(err); } });
+  });
+  es.onmessage = e => { try { const d=JSON.parse(e.data); handleEvent(d.type||'unknown',d); } catch(err){} };
+}
+connect();
+</script>
+</body>
+</html>
